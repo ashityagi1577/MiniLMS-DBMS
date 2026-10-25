@@ -1,8 +1,8 @@
 # MiniLMS — Online Learning Management System
 
-A complete **frontend-only** demonstration built for a college B.Tech CSE **DBMS PBL** assignment.
-It uses only **HTML5, CSS3 and vanilla JavaScript** — no frameworks, no libraries, no build tools,
-no server and no internet connection required.
+A college B.Tech CSE **DBMS PBL** project: a vanilla JS/HTML/CSS frontend plus a
+Node.js + Express + MySQL backend in `backend/` (the app also still runs in a
+frontend-only, `localStorage` demo mode with no server).
 
 Three roles (Student, Instructor, Admin) work on top of a single seeded demo dataset stored in
 `localStorage`, with every business rule enforced client-side and logged to an audit trail.
@@ -21,6 +21,59 @@ python -m http.server 8000
 
 Then open <http://localhost:8000>.
 
+### Full-stack mode: Node.js + Express + MySQL
+
+The backend in `backend/` serves the same frontend plus the JSON API under
+`/api`, and stores everything in MySQL. Run it from one URL:
+
+1. **Configure credentials locally — never in Git:**
+
+   ```powershell
+   cd backend
+   Copy-Item .env.example .env
+   # edit .env and set DB_PASSWORD to your local MySQL password
+   npm install
+   npm start
+   ```
+
+   * `backend/.env` holds the real credentials and is **git-ignored** — never
+     commit it, paste it into docs/screenshots, or share it.
+   * `backend/.env.example` is the tracked template and contains **placeholders
+     only** (`DB_PASSWORD=CHANGE_ME`). Fill in values in your local `.env`.
+   * Credentials are read only by `backend/db.js` via `dotenv`; they are never
+     sent to the browser, returned by the API, or written to logs.
+2. Open <http://localhost:5000>. If MySQL is unreachable the UI shows an
+   offline warning and falls back to the local demo dataset.
+
+> **Development-only credentials:** the seeded demo accounts (see
+> `database/03_insert_sample_data.sql`) all sign in with the password
+> `demo123` (`DEMO_PASSWORD` in `.env`). That weak shared password exists only
+> so the project can be evaluated without a real identity provider — it is a
+> local academic-demo limitation, not production authentication. Rotate it (and
+> the database password) before any real deployment.
+
+### Authentication & session security (backend mode)
+
+- **Passwords** are verified with bcrypt (cost 10) for API-created accounts and
+  hashes are never returned by any endpoint. Seeded rows use the documented
+  development-only `DEMO_PASSWORD` fallback (see above).
+- **Sessions** are bearer tokens: 32 random bytes (`crypto.randomBytes`, 64 hex
+  chars). The server stores only a SHA-256 hash of each token plus user id and
+  expiry — never a password. Tokens expire after `TOKEN_TTL_MINUTES` (default
+  480), are revoked on logout, and a password change revokes every other
+  session of that user (max 5 concurrent sessions per user).
+- **Login rate limiting** is an in-memory sliding window: 5 failed password
+  checks per client IP + e-mail and 100 per client IP in 15 minutes, then HTTP
+  `429` with `Retry-After`. Counters reset when the server restarts and are not
+  shared between processes.
+- **No account enumeration**: unknown e-mail, wrong password and deactivated
+  account all return the same generic `401` body, and rate limiting runs before
+  the database lookup. Malformed e-mails still get `400`.
+- **Password change** exists and requires a valid token plus the current
+  password (`POST /api/auth/change-password`); admins can also reset a user's
+  password. There is **no** forgot-password / e-mail reset flow — adding one
+  would require a one-time-token table, expiry handling and an e-mail provider.
+
 Sign in with any seeded account (password `demo123`), or click a role card
 (**Student / Instructor / Admin**) to enter instantly with the default account of that role.
 
@@ -33,26 +86,30 @@ Sign in with any seeded account (password `demo123`), or click a role card
 | `index.html` | App shell: login/role-selection screen, sidebar, top bar, toast + modal containers. |
 | `style.css` | Design system: blue/purple palette, cards, tables, light **and dark** themes, responsive + print styles. |
 | `script.js` | Seed data, `store`/`session`/`api` service layer, hash router, all role pages, forms and actions. |
+| `backend/` | Express + mysql2 API (auth, validation, SQL). Credentials come from `backend/.env` (template: `backend/.env.example`). |
 | `README.md` | This file. |
 
 ---
 
-## Demo accounts (password: `demo123`)
+## Demo accounts — development only (password: `demo123`)
 
-| Role | Email | Notes |
-|------|-------|-------|
-| Admin | `admin@minilms.demo` | Priya Sharma — user management, oversight, audit log |
-| Instructor | `ananya@minilms.demo` | DB-101 + CN-260, seeded grades (published & draft) |
-| Instructor | `ravi@minilms.demo` | WD-204, PY-110 |
-| Instructor | `sneha@minilms.demo` | DS-230, OS-150 |
-| Student | `aarav@student.minilms.demo` | 3 enrollments, partial progress, released + draft grades |
-| Student | `diya@student.minilms.demo` | Completed DB-101 → **earns a certificate** |
-| … | `rohan/`, `kavya/`, `arjun/`, `meera/`, `vikram/`, `isha@student.minilms.demo` | 8 students in total |
+> These credentials exist purely for the local academic demo. Never reuse this
+> password (or any seeded account) for anything real.
 
-**Seeded dataset:** 12 users · 6 courses (DB-101, WD-204, PY-110, DS-230, OS-150, CN-260) ·
-12 modules · 36 lessons · 7 quizzes (5 published, 1 draft, 1 upcoming) · enrollments, lesson
-progress, quiz attempts, grades, grade history, notifications, notices, activity events and audit
-entries.
+The login screen offers one demo account per role (configured locally in
+`script.js` → `DEMO_ACCOUNTS`). With the backend running, every account from
+`database/03_insert_sample_data.sql` works as well (e-mails end in
+`@example.com`):
+
+| Role | Email |
+|------|-------|
+| Admin | `priya.sharma@example.com` |
+| Instructor | `ananya.iyer@example.com` |
+| Student | `aarav.mehta@example.com` |
+
+**Seeded data (MySQL backend):** 13 users · 3 courses · 6 modules · 14 lessons ·
+11 enrollments · 4 quizzes · 6 attempts · 4 grades. The frontend-only mode
+keeps its own simulated dataset in `localStorage`.
 
 ---
 
@@ -126,12 +183,23 @@ script.js   →  1. utilities   2. seed data (COURSE_BLUEPRINTS / QUIZ_BLUEPRINT
   store. Replacing each method body with `fetch('/api/…')` turns this into a real client for a
   PHP/Node/Java backend **without touching the UI code**.
 
-## Known limitations (frontend-only)
+## Known limitations
 
-- No real authentication, authorization or security — role checks are UI-level demonstrations.
-- `localStorage` is per-browser/per-device; there is no multi-user sync or server validation.
-- Assignment submissions, video hosting and email notifications are out of scope (placeholders).
+**Frontend-only mode**
+- Role checks are UI-level demonstrations; the backend enforces them for real.
+- `localStorage` is per-browser/per-device; there is no multi-user sync.
+- Assignment submissions, video hosting and e-mail notifications are out of scope (placeholders).
 - Data can be restored at any time with **Reset demo data** (profile menu → danger zone).
+
+**Backend mode**
+- Sessions and login-rate-limit counters live in process memory: a restart signs
+  everyone out and resets counters; multiple instances do not share them (use
+  MySQL or Redis for production).
+- Demo accounts share the development-only `demo123` password and seeded hashes
+  are placeholders until replaced (see the dev-only note above).
+- CORS reflects the request origin (Bearer tokens, no cookies) and there is no
+  HTTPS termination in the local demo.
+- No token refresh and no forgot-password / e-mail reset flow.
 
 ## Verification performed
 

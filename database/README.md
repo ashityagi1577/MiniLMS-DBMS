@@ -42,13 +42,18 @@ data, and 10 example queries.
 
 ```bat
 cd /d C:\Users\Lenovo\Downloads\SmartConnect\minilms\database
-set MYSQL_PWD=your_password
+set MYSQL_PWD=<your-local-mysql-password>
 "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root < 01_create_database.sql
 "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root < 02_create_tables.sql
 "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root < 03_insert_sample_data.sql
 "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root < 04_queries.sql
 "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root < 05_views.sql
 ```
+
+`MYSQL_PWD` is set for this terminal session only - never commit it, hardcode it
+in a script, or paste the real password into documentation. The Express backend
+reads the same credentials from `backend/.env` (git-ignored; template:
+`backend/.env.example`).
 
 ## How to verify
 

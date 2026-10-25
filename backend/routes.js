@@ -15,9 +15,11 @@ const bcrypt = require('bcryptjs');
 const db = require('./db');
 const mappers = require('./mappers');
 const v = require('./validators');
+const rateLimit = require('./ratelimit');
 const {
   issueToken,
   revokeToken,
+  revokeUserSessions,
   verifyPassword,
   toPublicUser,
   requireAuth,
@@ -29,6 +31,17 @@ const router = express.Router();
 
 /** Wrap async handlers so thrown ApiErrors reach the error middleware. */
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+/**
+ * A throwaway bcrypt hash used to spend the same work for unknown e-mails as
+ * for real accounts, so sign-in timing does not reveal whether an address is
+ * registered. (No password is involved: the comparison always fails.)
+ */
+const TIMING_DUMMY_HASH = bcrypt.hashSync('mini-lms-timing-equaliser', 10);
+
+function clientIp(req) {
+  return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+}
 
 /* =========================== health & demo helpers ======================= */
 
@@ -42,11 +55,15 @@ router.get('/health', h(async (req, res) => {
 }));
 
 /**
- * Public demo helper: name/e-mail/role of accounts so the login screen can
- * build its "Choose a demo account" dropdown. Returns NO passwords and no
- * other fields. (A production app would not expose this - see README.)
+ * Account list - ADMIN ONLY (requireAuth + requireRole('Admin').
+ *
+ * This endpoint used to be public, which let any unauthenticated visitor
+ * enumerate every user's name, e-mail, role and status (account-enumeration
+ * vulnerability). The login screen no longer needs it: the frontend ships a
+ * small local demo-account config (DEMO_ACCOUNTS in script.js) instead.
+ * Admins can still list accounts here or via GET /api/users below.
  */
-router.get('/auth/accounts', h(async (req, res) => {
+router.get('/auth/accounts', requireAuth, requireRole('Admin'), h(async (req, res) => {
   const rows = await db.query('SELECT UserID, Name, Email, Role, Status FROM Users ORDER BY Role, UserID');
   res.json({ ok: true, users: rows.map(toPublicUser) });
 }));
@@ -56,13 +73,34 @@ router.get('/auth/accounts', h(async (req, res) => {
 router.post('/auth/login', h(async (req, res) => {
   const emailInput = v.email(req.body && req.body.email);
   const passwordInput = String((req.body && req.body.password) ?? '');
+  const ip = clientIp(req);
+
+  // Rate limit BEFORE touching the database so a blocked client learns
+  // nothing about the account either (generic 429, no enumeration).
+  const gate = rateLimit.check(ip, emailInput);
+  if (gate.blocked) {
+    res.set('Retry-After', String(gate.retryAfterSeconds));
+    throw new v.ApiError(429, 'Too many sign-in attempts. Please try again later.');
+  }
 
   const row = await db.get('SELECT * FROM Users WHERE Email = ?', [emailInput]);
-  if (!row) throw new v.ApiError(401, 'No account found for that email.');
-  if (row.Status !== 'Active') throw new v.ApiError(403, 'This account is deactivated. Contact an admin.');
-  const okPassword = await verifyPassword(row, passwordInput);
-  if (!okPassword) throw new v.ApiError(401, 'Incorrect password. Demo accounts use demo123.');
+  if (!row) {
+    // Spend the same bcrypt work as a real check, then fail generically:
+    // the response must not reveal whether this e-mail is registered.
+    await bcrypt.compare(passwordInput, TIMING_DUMMY_HASH);
+    rateLimit.recordFailure(ip, emailInput);
+    throw new v.ApiError(401, 'Invalid email or password.');
+  }
 
+  const okPassword = await verifyPassword(row, passwordInput);
+  // Inactive accounts deliberately get the same generic answer (no status
+  // oracle for attackers); admins still see the status in user management.
+  if (!okPassword || row.Status !== 'Active') {
+    rateLimit.recordFailure(ip, emailInput);
+    throw new v.ApiError(401, 'Invalid email or password.');
+  }
+
+  rateLimit.recordSuccess(ip, emailInput);
   const token = issueToken(row.UserID);
   res.json({ ok: true, token, user: toPublicUser(row) });
 }));
@@ -84,6 +122,9 @@ router.post('/auth/change-password', requireAuth, h(async (req, res) => {
   if (!okCurrent) throw new v.ApiError(400, 'Current password is incorrect.');
   const hash = await bcrypt.hash(next, 10);
   await db.query('UPDATE Users SET PasswordHash = ? WHERE UserID = ?', [hash, req.user.UserID]);
+  // Keep the session that made the change, drop every other session of this
+  // user (an attacker holding a stolen token loses access after a reset).
+  revokeUserSessions(req.user.UserID, req.token);
   res.json({ ok: true });
 }));
 
@@ -91,7 +132,7 @@ router.post('/auth/change-password', requireAuth, h(async (req, res) => {
 
 /** Everything the frontend needs after login (one request, no passwords). */
 router.get('/bootstrap', requireAuth, h(async (req, res) => {
-  const payload = await mappers.fetchBootstrap();
+  const payload = await mappers.fetchBootstrap(req.user);
   res.json({ ok: true, ...payload });
 }));
 
@@ -730,6 +771,7 @@ router.put('/users/:id', requireAuth, h(async (req, res) => {
 
   const fields = [];
   const params = [];
+  let passwordChanged = false;
   if (body.name !== undefined) {
     fields.push('Name = ?');
     params.push(v.str(body.name, 'Name', { max: 100 }));
@@ -759,10 +801,16 @@ router.put('/users/:id', requireAuth, h(async (req, res) => {
     const plain = v.password(body.password, 'Password');
     fields.push('PasswordHash = ?');
     params.push(await bcrypt.hash(plain, 10));
+    passwordChanged = true;
   }
   if (!fields.length) throw new v.ApiError(400, 'Nothing to update.');
   params.push(id);
   await db.query(`UPDATE Users SET ${fields.join(', ')} WHERE UserID = ?`, params);
+  if (passwordChanged) {
+    // Revoke the user's sessions after a password reset; if an admin is
+    // resetting their own password, keep the session that made the change.
+    revokeUserSessions(id, isSelf ? req.token : null);
+  }
   const fresh = await db.get('SELECT * FROM Users WHERE UserID = ?', [id]);
   res.json({ ok: true, user: mappers.mapUser(fresh) });
 }));

@@ -3,6 +3,9 @@ node_modules/
 
 # Secrets - never commit
 .env
+.env.*
+# ...but the placeholder template is meant to be tracked:
+!.env.example
 
 # Logs
 *.log

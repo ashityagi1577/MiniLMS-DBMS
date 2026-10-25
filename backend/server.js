@@ -22,6 +22,7 @@ const routes = require('./routes');
 const { ApiError } = require('./validators');
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = Number(process.env.PORT) || 5000;
 const FRONTEND_DIR = path.join(__dirname, '..');
 
@@ -42,6 +43,12 @@ app.use(cors({
 app.use(express.json({ limit: '256kb' }));
 
 // ---- API ----------------------------------------------------------------
+// API responses (including the login token) must not be cached by browsers or
+// intermediate proxies.
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 app.use('/api', routes);
 
 // ---- Frontend (static, just the three app files) ------------------------
@@ -69,7 +76,11 @@ app.use((err, req, res, next) => {
   if (err && (err.sqlState === '45000' || err.errno === 3819)) {
     return res.status(400).json({ ok: false, error: err.sqlMessage || 'Database rule violated.' });
   }
-  console.error('[MiniLMS] Unhandled error:', err);
+  // Log a compact, credential-free summary. mysql2 error objects can carry
+  // SQL text and connection metadata, so the full object is never dumped to
+  // log files (log redirection writes backend/*.log).
+  const summary = `${(err && (err.code || err.name)) || 'Error'} - ${(err && err.message) || String(err)}`;
+  console.error('[MiniLMS] Unhandled error:', summary);
   res.status(500).json({ ok: false, error: 'Internal server error.' });
 });
 

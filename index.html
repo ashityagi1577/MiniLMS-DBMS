@@ -4,21 +4,220 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MiniLMS — Online Learning Management System</title>
-  <meta name="description" content="MiniLMS demo frontend for a college DBMS project. Vanilla HTML, CSS and JavaScript only.">
+  <meta name="description" content="MiniLMS is a database-driven learning management system for courses, lessons, quizzes, enrollments and grades.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%93%3C/text%3E%3C/svg%3E">
 </head>
 <body>
 
+  <!-- ========================= PUBLIC LANDING ========================== -->
+  <section id="landing" class="landing" aria-label="MiniLMS public homepage">
+    <header class="landing-nav">
+      <div class="landing-nav-inner">
+        <a href="#landing-home" class="landing-brand" aria-label="MiniLMS home">
+          <span class="brand-mark" aria-hidden="true">ML</span>
+          <span class="landing-brand-text">MiniLMS</span>
+        </a>
+        <nav class="landing-links" aria-label="Public navigation">
+          <a href="#landing-courses">Courses</a>
+          <a href="#landing-categories">Categories</a>
+          <a href="#landing-about">About</a>
+        </nav>
+        <form id="landing-search-form" class="landing-search" role="search">
+          <input id="landing-search" type="search" placeholder="Search courses&hellip;" aria-label="Search courses">
+          <button type="submit" class="icon-btn" aria-label="Search courses">&#9906;</button>
+        </form>
+        <div class="landing-actions">
+          <button type="button" class="btn btn-ghost" data-act="open-login">Sign In</button>
+          <button type="button" class="btn btn-primary" data-act="open-login">Get Started</button>
+        </div>
+        <button type="button" class="icon-btn landing-menu-btn" id="landing-menu-btn"
+          aria-label="Open navigation" aria-expanded="false">&#9776;</button>
+      </div>
+      <div id="landing-mobile-menu" class="landing-mobile-menu" hidden>
+        <a href="#landing-courses">Courses</a>
+        <a href="#landing-categories">Categories</a>
+        <a href="#landing-about">About</a>
+        <button type="button" class="btn btn-primary btn-block" data-act="open-login">Sign In</button>
+      </div>
+    </header>
+
+    <main id="landing-home">
+      <section class="landing-hero">
+        <div class="landing-hero-inner">
+          <div class="landing-hero-copy">
+            <span class="landing-eyebrow">Database-driven learning</span>
+            <h1>Transform Your Future with Expert-Led Learning</h1>
+            <p>Discover courses, learn new skills, and organize your learning journey with MiniLMS.</p>
+            <div class="landing-hero-actions">
+              <button type="button" class="btn btn-primary btn-lg" data-act="open-login">Get Started</button>
+              <a class="btn btn-outline btn-lg" href="#landing-courses">Explore Courses</a>
+            </div>
+            <div class="landing-highlights" aria-label="Platform highlights">
+              <span><b>&#10003;</b> Role-based dashboards</span>
+              <span><b>&#10003;</b> MySQL-backed records</span>
+              <span><b>&#10003;</b> Quizzes and grades</span>
+            </div>
+          </div>
+          <div class="landing-hero-visual" aria-hidden="true">
+            <div class="hero-visual-glow"></div>
+            <div class="hero-visual-card hero-visual-main">
+              <div class="hero-visual-top"><span class="hero-dot"></span><span class="hero-dot"></span><span class="hero-dot"></span></div>
+              <div class="hero-visual-badge">Course progress</div>
+              <div class="hero-visual-line w-80"></div>
+              <div class="hero-visual-line w-55"></div>
+              <div class="hero-visual-progress"><span></span></div>
+              <div class="hero-visual-row">
+                <div class="hero-visual-avatar"></div>
+                <div><div class="hero-visual-line w-60"></div><div class="hero-visual-line w-40"></div></div>
+              </div>
+            </div>
+            <div class="hero-visual-card hero-visual-float">
+              <span class="hero-float-icon">&#9998;</span>
+              <div><strong>Quiz ready</strong><small>Assessment available</small></div>
+            </div>
+            <div class="hero-visual-card hero-visual-float hero-visual-float-2">
+              <span class="hero-float-icon">&#9733;</span>
+              <div><strong>Grade released</strong><small>Instructor feedback</small></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="landing-section" id="landing-categories">
+        <div class="landing-section-head">
+          <div>
+            <span class="landing-eyebrow">Explore</span>
+            <h2>Learning areas</h2>
+            <p>These are general learning areas. MiniLMS course records do not store category filters &mdash; sign in to browse the live catalog.</p>
+          </div>
+        </div>
+        <div class="category-grid">
+          <button type="button" class="category-card" data-act="open-login" data-area="Database Systems">
+            <span class="category-icon">&#128451;</span><strong>Database Systems</strong><small>Relational design &amp; SQL</small>
+          </button>
+          <button type="button" class="category-card" data-act="open-login" data-area="Web Development">
+            <span class="category-icon">&#127760;</span><strong>Web Development</strong><small>HTML, CSS &amp; JavaScript</small>
+          </button>
+          <button type="button" class="category-card" data-act="open-login" data-area="Programming">
+            <span class="category-icon">&#128187;</span><strong>Programming</strong><small>Core language skills</small>
+          </button>
+          <button type="button" class="category-card" data-act="open-login" data-area="Software Engineering">
+            <span class="category-icon">&#9881;</span><strong>Software Engineering</strong><small>Design &amp; process</small>
+          </button>
+          <button type="button" class="category-card" data-act="open-login" data-area="Data &amp; Analytics">
+            <span class="category-icon">&#128202;</span><strong>Data &amp; Analytics</strong><small>Insight from records</small>
+          </button>
+          <button type="button" class="category-card" data-act="open-login" data-area="Cloud &amp; DevOps">
+            <span class="category-icon">&#9729;</span><strong>Cloud &amp; DevOps</strong><small>Deploy &amp; operate</small>
+          </button>
+        </div>
+      </section>
+
+      <section class="landing-section landing-courses-section" id="landing-courses">
+        <div class="landing-section-head">
+          <div>
+            <span class="landing-eyebrow">Course catalog</span>
+            <h2>Explore courses</h2>
+            <p>The live catalog is protected. Sign in to view published courses, instructors, modules, lessons and quizzes.</p>
+          </div>
+          <button type="button" class="btn btn-outline" data-act="open-login">Sign in to browse</button>
+        </div>
+        <div class="card landing-course-empty">
+          <div class="empty-state">
+            <div class="empty-icon">&#128218;</div>
+            <h3>Course data is available after sign in</h3>
+            <p>MiniLMS keeps course records behind authenticated, role-scoped access. No sample ratings, prices or enrolment counts are shown here.</p>
+            <button type="button" class="btn btn-primary" data-act="open-login">Open the catalog</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="landing-section" id="landing-about">
+        <div class="landing-about-grid">
+          <div>
+            <span class="landing-eyebrow">About</span>
+            <h2>About MiniLMS</h2>
+            <p>MiniLMS is a database-driven learning management system designed to organize courses, modules, lessons, enrollments, quizzes, attempts, and grades. It demonstrates relational database design, normalization, and data integrity using MySQL.</p>
+            <div class="landing-about-steps">
+              <div class="about-step"><span>1</span><div><strong>Organize Courses</strong><small>Courses, modules and ordered lessons.</small></div></div>
+              <div class="about-step"><span>2</span><div><strong>Manage Learning Activities</strong><small>Enrollments, progress and quiz attempts.</small></div></div>
+              <div class="about-step"><span>3</span><div><strong>Track Assessment Records</strong><small>Grades, feedback and instructor review.</small></div></div>
+            </div>
+          </div>
+          <div class="about-visual" aria-hidden="true">
+            <div class="about-visual-row"><span class="about-visual-icon">&#128218;</span><div><div class="about-visual-line w-80"></div><div class="about-visual-line w-50"></div></div><span class="badge badge-info">Courses</span></div>
+            <div class="about-visual-row"><span class="about-visual-icon">&#9998;</span><div><div class="about-visual-line w-70"></div><div class="about-visual-line w-45"></div></div><span class="badge badge-purple">Quizzes</span></div>
+            <div class="about-visual-row"><span class="about-visual-icon">&#9733;</span><div><div class="about-visual-line w-60"></div><div class="about-visual-line w-40"></div></div><span class="badge badge-success">Grades</span></div>
+            <div class="about-visual-note">Normalized MySQL records &middot; role-scoped access</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="landing-section" id="landing-features">
+        <div class="landing-section-head">
+          <div><span class="landing-eyebrow">Platform</span><h2>Key features</h2>
+            <p>Built around the data the application actually stores.</p></div>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card"><span class="feature-icon">&#128449;</span><h3>Structured courses</h3><p>Courses contain ordered modules and lessons with release metadata where available.</p></article>
+          <article class="feature-card"><span class="feature-icon">&#9998;</span><h3>Assessments</h3><p>Quizzes track availability windows and attempts, with grades attached to attempts.</p></article>
+          <article class="feature-card"><span class="feature-icon">&#128274;</span><h3>Role-scoped access</h3><p>Students, instructors and administrators receive only the records their role needs.</p></article>
+          <article class="feature-card"><span class="feature-icon">&#128200;</span><h3>Progress &amp; results</h3><p>Lesson completion and published grades appear in student dashboards.</p></article>
+        </div>
+      </section>
+
+      <section class="landing-section" id="landing-roles">
+        <div class="landing-section-head">
+          <div><span class="landing-eyebrow">Roles</span><h2>One platform, three workspaces</h2></div>
+        </div>
+        <div class="role-grid">
+          <article class="role-panel"><span class="role-icon">&#9998;</span><h3>Students</h3><p>Browse courses, enroll, complete lessons, take quizzes and review released grades.</p><button type="button" class="btn btn-outline btn-block" data-act="open-login">Student sign in</button></article>
+          <article class="role-panel"><span class="role-icon">&#9733;</span><h3>Instructors</h3><p>Manage owned courses, modules, lessons, quizzes, rosters and gradebooks.</p><button type="button" class="btn btn-outline btn-block" data-act="open-login">Instructor sign in</button></article>
+          <article class="role-panel"><span class="role-icon">&#9881;</span><h3>Administrators</h3><p>Manage users and course oversight, review enrollments and local audit activity.</p><button type="button" class="btn btn-outline btn-block" data-act="open-login">Admin sign in</button></article>
+        </div>
+      </section>
+
+      <section class="landing-cta">
+        <div>
+          <span class="landing-eyebrow">Start learning</span>
+          <h2>Ready to organize your learning?</h2>
+          <p>Sign in with a demo account to explore the role-based MiniLMS workspace.</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-lg" data-act="open-login">Get Started</button>
+      </section>
+    </main>
+
+    <footer class="landing-footer">
+      <div class="landing-footer-inner">
+        <div class="landing-footer-brand"><span class="brand-mark brand-mark-sm">ML</span><div><strong>MiniLMS</strong><small>Database-driven learning management</small></div></div>
+        <nav class="landing-footer-links" aria-label="Footer">
+          <a href="#landing-home">Home</a>
+          <a href="#landing-courses">Courses</a>
+          <a href="#landing-categories">Categories</a>
+          <a href="#landing-about">About</a>
+          <button type="button" class="link-button" data-act="open-login">Login</button>
+        </nav>
+      </div>
+      <div class="landing-footer-note">MiniLMS &middot; MySQL-backed course management &middot; No external accounts or unsupported claims.</div>
+    </footer>
+  </section>
+
   <!-- ======================= AUTH / ROLE SELECTOR ======================= -->
-  <section id="auth-screen" class="auth-screen" aria-label="Sign in to MiniLMS">
+  <section id="auth-screen" class="auth-screen auth-overlay" aria-label="Sign in to MiniLMS" hidden>
     <div class="auth-card">
+      <button type="button" class="auth-close icon-btn" data-act="close-login" aria-label="Back to public homepage">&#10005;</button>
       <div class="auth-brand">
         <div class="brand-mark" aria-hidden="true">ML</div>
         <h1>MiniLMS</h1>
-        <p class="auth-sub">Online Learning Management System &mdash; frontend demonstration</p>
-        <p class="demo-badge">DEMO DATA ONLY &bull; NO REAL AUTHENTICATION</p>
+        <p class="auth-sub">Online Learning Management System</p>
+        <p class="demo-badge">SECURE DEMO &bull; PASSWORD-VERIFIED SIGN IN</p>
       </div>
+
+      <div id="auth-notice" class="auth-notice" role="status" hidden></div>
 
       <form id="login-form" novalidate>
         <div class="form-group">
@@ -26,7 +225,7 @@
           <select id="login-email" class="form-control" required aria-describedby="login-email-hint">
             <option value="">Choose a demo account&hellip;</option>
           </select>
-          <small id="login-email-hint" class="form-hint">Pick any seeded demo account to enter the application.</small>
+          <small id="login-email-hint" class="form-hint">Demo accounts are configured locally in <code>script.js</code> (DEMO_ACCOUNTS); the server verifies every sign-in.</small>
         </div>
         <div class="form-group">
           <label for="login-password">Password</label>
@@ -68,6 +267,13 @@
       <div class="sidebar-brand">
         <div class="brand-mark brand-mark-sm" aria-hidden="true">ML</div>
         <span class="sidebar-brand-text">MiniLMS</span>
+      </div>
+      <div class="sidebar-user">
+        <span id="sidebar-avatar" class="avatar" aria-hidden="true">?</span>
+        <div class="sidebar-user-text">
+          <strong id="sidebar-name">User</strong>
+          <small id="sidebar-role">Signed in</small>
+        </div>
       </div>
       <nav id="sidebar-nav" class="sidebar-nav"><!-- built by JS --></nav>
       <div class="sidebar-footer">

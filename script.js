@@ -87,6 +87,24 @@ const SESSION_KEY = 'minilms_session_v1';
 const THEME_KEY = 'minilms_theme';
 const DEMO_PASSWORD = 'demo123';
 
+/**
+ * Local demo-account configuration for the login screen (one per role).
+ *
+ * The backend no longer publishes its user list: GET /api/auth/accounts is
+ * admin-only, so unauthenticated visitors can never enumerate real accounts.
+ * This static list ships with the frontend instead - it contains only the
+ * same demo credentials a login form would show (name/label + e-mail of the
+ * seeded accounts in database/03_insert_sample_data.sql) and no private
+ * data. It is NOT trusted for authentication: the server verifies the
+ * e-mail + password and issues the token; the role always comes from the
+ * server-side user row, never from the client.
+ */
+const DEMO_ACCOUNTS = [
+  { name: 'Priya Sharma', email: 'priya.sharma@example.com', role: 'admin' },
+  { name: 'Ananya Iyer', email: 'ananya.iyer@example.com', role: 'instructor' },
+  { name: 'Aarav Mehta', email: 'aarav.mehta@example.com', role: 'student' },
+];
+
 const COURSE_BLUEPRINTS = [
   {
     code: 'DB-101', title: 'Database Management Systems', category: 'Computer Science',
@@ -484,7 +502,38 @@ function buildSeed() {
 
 /* ==================== 3. Backend transport & overlays ==================== */
 const TOKEN_KEY = 'minilms_token_v1';   // bearer token from POST /api/auth/login
-const EXT_KEY = 'minilms_ext_v1';       // overlay for fields MySQL does not have
+const EXT_KEY = 'minilms_ext_v1';       // shared course-content overlay (not user data)
+let AUTH_NOTICE = '';                   // friendly session message shown over the login form
+
+/** Cache the authenticated snapshot under the user it belongs to. */
+function dbCacheKey(owner = localStorage.getItem(SESSION_KEY) || '') {
+  return owner ? `${DB_KEY}:${owner}` : '';
+}
+
+/** Remove every user-specific MiniLMS cache entry; theme and shared content stay. */
+function clearUserCacheStorage() {
+  try {
+    const keep = new Set([THEME_KEY, EXT_KEY]);
+    const doomed = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && !keep.has(key) && (key === DB_KEY || key === TOKEN_KEY || key === SESSION_KEY
+        || key.startsWith(`${DB_KEY}:`))) doomed.push(key);
+    }
+    doomed.forEach((key) => localStorage.removeItem(key));
+    for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith('minilms_')) sessionStorage.removeItem(key);
+    }
+  } catch (err) { /* storage can be unavailable */ }
+}
+
+/** Clear all in-memory user state plus its persisted caches. */
+function clearUserCache() {
+  clearUserCacheStorage();
+  db = null;
+  AUTH_NOTICE = '';
+}
 // Backend base URL: empty when the page is served BY the backend (same origin),
 // http://localhost:5000 for file:// or any other port. Override by setting
 // window.MINILMS_API_BASE before this script loads.
@@ -661,7 +710,11 @@ function applyServerData(payload) {
 /** Reload all server-backed collections from MySQL (throws on failure). */
 async function syncFromServer() {
   const res = await apiFetch('/api/bootstrap');
-  if (!res.ok) throw new Error(res.error || 'Could not reload data from the backend.');
+  if (!res.ok) {
+    const err = new Error(res.error || 'Could not reload data from the backend.');
+    err.status = res.status;
+    throw err;
+  }
   applyServerData(res);
   store.save();
 }
@@ -674,22 +727,18 @@ const store = {
    * Boot order:
    *  1. read the localStorage snapshot (keeps MySQL-less collections)
    *  2. valid token  -> GET /api/bootstrap (full MySQL dataset)
-   *     no token     -> GET /api/auth/accounts (login-screen dropdown)
+   *     no token     -> GET /api/health (public reachability check only;
+   *                     the login-screen account choices come from the
+   *                     local DEMO_ACCOUNTS config, never from the server)
    *  3. backend down -> cached snapshot, else the original demo seed
    */
   async load() {
     loadOverlays();
-    try {
-      const raw = localStorage.getItem(DB_KEY);
-      db = raw ? JSON.parse(raw) : null;
-    } catch (err) { db = null; }
-    if (!db || typeof db !== 'object') db = null;
-    ['progress', 'notifications', 'audit', 'activity', 'notices', 'gradeHistory'].forEach((k) => {
-      if (db && !Array.isArray(db[k])) db[k] = [];
-    });
-
     const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
+    const owner = localStorage.getItem(SESSION_KEY) || '';
+    db = null;
+
+    if (token && owner) {
       const res = await apiFetch('/api/bootstrap');
       if (res.ok) {
         OFFLINE = false;
@@ -698,55 +747,53 @@ const store = {
         return;
       }
       if (res.status === 401 || res.status === 403) {
-        localStorage.removeItem(TOKEN_KEY);
-        session.clear();
+        clearUserCacheStorage();
+        AUTH_NOTICE = 'Your session expired or is no longer valid. Please sign in again.';
+        return;
       }
-    }
-
-    const acc = await apiFetch('/api/auth/accounts');
-    if (acc.ok) {
-      db = {
-        version: 1, seededAt: (db && db.seededAt) || nowISO(),
-        users: acc.users, courses: [], modules: [], lessons: [], enrollments: [],
-        quizzes: [], attempts: [], grades: [],
-        progress: db ? db.progress : [], notifications: db ? db.notifications : [],
-        audit: db ? db.audit : [], activity: db ? db.activity : [],
-        notices: db ? db.notices : [], gradeHistory: db ? db.gradeHistory : [],
-      };
-      OFFLINE = false;
-      store.save();
+      // Network/server failure: only restore the snapshot belonging to this user.
+      try {
+        const raw = localStorage.getItem(dbCacheKey(owner));
+        const cached = raw ? JSON.parse(raw) : null;
+        if (cached && typeof cached === 'object' && Array.isArray(cached.users)) {
+          db = cached;
+          ['progress', 'notifications', 'audit', 'activity', 'notices', 'gradeHistory'].forEach((k) => {
+            if (!Array.isArray(db[k])) db[k] = [];
+          });
+          OFFLINE = true;
+          return;
+        }
+      } catch (err) { db = null; }
+      AUTH_NOTICE = 'Could not load your account data. Check the backend connection and try again.';
       return;
     }
 
-    // Backend unreachable.
-    if (db && Array.isArray(db.users) && db.users.length) {
-      OFFLINE = true; // use cached snapshot as-is
-      return;
-    }
-    db = buildSeed(); // very first run without a backend
-    OFFLINE = true;
-    store.save();
+    if (owner || token) clearUserCacheStorage(); // orphaned/incomplete session
+    const health = await apiFetch('/api/health');
+    OFFLINE = !health.ok;
   },
 
   save() {
-    try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (err) { console.warn('localStorage save failed', err); }
+    const key = dbCacheKey();
+    if (!db || !key) return;
+    try { localStorage.setItem(key, JSON.stringify(db)); } catch (err) { console.warn('localStorage save failed', err); }
   },
 
   reset() {
-    localStorage.removeItem(DB_KEY);
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(EXT_KEY);
+    clearUserCacheStorage();
+    try { localStorage.removeItem(EXT_KEY); } catch (err) { /* ignore */ }
     session.clear();
+    db = null;
   },
 };
 
 const session = {
   get user() {
+    if (!db || !Array.isArray(db.users)) return null;
     const id = localStorage.getItem(SESSION_KEY);
     return id ? byId(db.users, id) : null;
   },
-  set(userId) { localStorage.setItem(SESSION_KEY, userId); },
+  set(userId) { localStorage.setItem(SESSION_KEY, String(userId)); },
   clear() { localStorage.removeItem(SESSION_KEY); },
 };
 
@@ -839,6 +886,7 @@ async function syncQuiet() {
 const api = {
   /* ---- auth: the server verifies the password and issues the token ---- */
   async login(email, password) {
+    clearUserCache();
     const res = await apiFetch('/api/auth/login', { method: 'POST', body: { email, password } });
     if (!res.ok) return res;
     localStorage.setItem(TOKEN_KEY, res.token);
@@ -846,8 +894,10 @@ const api = {
     try {
       await syncFromServer();
     } catch (err) {
-      localStorage.removeItem(TOKEN_KEY);
-      session.clear();
+      clearUserCache();
+      if (err.status === 401 || err.status === 403) {
+        AUTH_NOTICE = 'You do not have access to that account. Please sign in again.';
+      }
       return { ok: false, error: err.message };
     }
     logAudit('login', 'user', res.user.id, `${res.user.name} signed in.`);
@@ -857,8 +907,10 @@ const api = {
   },
 
   async loginAsRole(role) {
-    const user = db.users.find((u) => u.role === role && u.status === 'active');
-    if (!user) return { ok: false, error: 'No active account for that role.' };
+    // Pick a demo account from the LOCAL config; the server still validates
+    // the e-mail, the password and the account status before issuing a token.
+    const user = DEMO_ACCOUNTS.find((u) => u.role === role);
+    if (!user) return { ok: false, error: 'No demo account configured for that role.' };
     return api.login(user.email, DEMO_PASSWORD);
   },
 
@@ -866,18 +918,13 @@ const api = {
     const u = session.user;
     if (u) logAudit('logout', 'user', u.id, `${u.name} signed out.`);
     try { await apiFetch('/api/auth/logout', { method: 'POST' }); } catch (err) { /* best effort */ }
-    session.clear();
-    localStorage.removeItem(TOKEN_KEY);
-    store.save();
+    clearUserCache();
   },
 
   async resetDemo() {
     // No server-side reset endpoint exists, so this clears the local session,
     // overlay and cache only - MySQL records are untouched (shown in the toast).
-    session.clear();
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(EXT_KEY);
-    localStorage.removeItem(DB_KEY);
+    store.reset();
     toast('Signed out and cleared local browser data. MySQL records are kept — the backend has no reset endpoint.', 'info');
     setTimeout(() => location.reload(), 900);
   },
@@ -1530,8 +1577,12 @@ function renderNav() {
 
 function renderShellChrome() {
   const user = session.user;
+  if (!user) return;
   $('#profile-name').textContent = user.name;
   $('#profile-avatar').textContent = initials(user.name);
+  $('#sidebar-name').textContent = user.name;
+  $('#sidebar-avatar').textContent = initials(user.name);
+  $('#sidebar-role').textContent = user.role;
   const unread = db.notifications.filter((n) => n.userId === user.id && !n.read).length;
   const dot = $('#notif-badge');
   dot.hidden = unread === 0;
@@ -1545,7 +1596,11 @@ const PAGES = {
 
 function render() {
   const user = session.user;
-  if (!user) { renderAuth(); return; }
+  if (!user) {
+    if ($('#auth-screen').hidden) renderLanding();
+    else renderAuth();
+    return;
+  }
 
   const route = parseHash();
   if (!route.page) { navigate(ROLE_HOME[user.role]); return; }
@@ -1581,10 +1636,27 @@ function render() {
   window.scrollTo({ top: 0 });
 }
 
-/* ======================= 9. Auth screen ================================= */
+/* ======================= 9. Landing & auth screens ====================== */
+function renderLanding() {
+  $('#app').hidden = true;
+  $('#auth-screen').hidden = true;
+  $('#landing').hidden = false;
+  $('#landing-mobile-menu').hidden = true;
+  AUTH_NOTICE = '';
+  document.body.classList.add('is-public');
+  window.scrollTo({ top: 0 });
+}
+
 function renderAuth() {
   $('#app').hidden = true;
+  $('#landing').hidden = true;
   $('#auth-screen').hidden = false;
+  document.body.classList.remove('is-public');
+  const notice = $('#auth-notice');
+  if (notice) {
+    notice.textContent = AUTH_NOTICE;
+    notice.hidden = !AUTH_NOTICE;
+  }
   const select = $('#login-email');
   if (select.options.length <= 1) {
     const groups = [
@@ -1592,13 +1664,61 @@ function renderAuth() {
     ];
     let html = '<option value="">Choose a demo account…</option>';
     groups.forEach(([label, role]) => {
-      const members = db.users.filter((u) => u.role === role && u.status === 'active');
+      const members = DEMO_ACCOUNTS.filter((u) => u.role === role);
       if (!members.length) return;
       html += `<optgroup label="${label}s">`;
       members.forEach((u) => { html += `<option value="${esc(u.email)}">${esc(u.name)} — ${esc(u.email)}</option>`; });
       html += '</optgroup>';
     });
     select.innerHTML = html;
+  }
+}
+
+function openLogin(notice = '') {
+  if (notice) AUTH_NOTICE = notice;
+  renderAuth();
+  setTimeout(() => {
+    const el = $('#login-email');
+    if (el) el.focus();
+  }, 60);
+}
+
+let PENDING_CATALOG = null;
+
+function routeAfterLogin(user) {
+  const pending = PENDING_CATALOG;
+  PENDING_CATALOG = null;
+  if (pending && (pending.q || pending.cat)) {
+    if (user.role === 'student') navigate('catalog', [], { q: pending.q || '', cat: pending.cat || '' });
+    else navigate('search', [], { q: pending.q || pending.cat || '' });
+    return;
+  }
+  navigate(ROLE_HOME[user.role]);
+}
+
+function wireLanding() {
+  const menuBtn = $('#landing-menu-btn');
+  const mobileMenu = $('#landing-mobile-menu');
+  if (menuBtn && mobileMenu) {
+    menuBtn.addEventListener('click', () => {
+      mobileMenu.hidden = !mobileMenu.hidden;
+      menuBtn.setAttribute('aria-expanded', String(!mobileMenu.hidden));
+    });
+    mobileMenu.addEventListener('click', (e) => {
+      if (e.target.closest('a')) {
+        mobileMenu.hidden = true;
+        menuBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+  const search = $('#landing-search-form');
+  if (search) {
+    search.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const q = ($('#landing-search')?.value || '').trim();
+      PENDING_CATALOG = { q, cat: '' };
+      openLogin(q ? `Sign in to search the live catalog for “${q}”.` : 'Sign in to browse the live course catalog.');
+    });
   }
 }
 
@@ -1612,11 +1732,27 @@ function wireAuth() {
     if (!email) { toast('Choose a demo account first.', 'warning'); return; }
     form._busy = true;
     try {
+      clearUserCache(); // never carry a previous user's snapshot into this login
       const res = await api.login(email, password);
-      if (!res.ok) { toast(res.error, 'error'); return; }
+      if (!res.ok) {
+        clearUserCache();
+        toast(res.error || 'Login failed', 'error');
+        renderAuth();
+        return;
+      }
+      if (!session.user) {
+        clearUserCache();
+        AUTH_NOTICE = 'Your account data could not be loaded. Please try again.';
+        renderAuth();
+        return;
+      }
       toast(`Welcome back, ${res.user.name.split(' ')[0]}!`, 'success');
-      navigate(ROLE_HOME[res.user.role]);
+      routeAfterLogin(res.user);
       render();
+    } catch (err) {
+      clearUserCache();
+      toast('Login failed. Please try again.', 'error');
+      renderAuth();
     } finally {
       form._busy = false;
     }
@@ -1630,7 +1766,7 @@ function wireAuth() {
         const res = await api.loginAsRole(btn.dataset.role);
         if (!res.ok) { toast(res.error, 'error'); return; }
         toast(`Signed in as ${res.user.name} (${btn.dataset.role}).`, 'success');
-        navigate(ROLE_HOME[btn.dataset.role]);
+        routeAfterLogin(res.user);
         render();
       } finally {
         btn._busy = false;
@@ -1642,11 +1778,15 @@ function wireAuth() {
 /* ======================= 10. Shell chrome wiring ======================== */
 function wireShell() {
   $('#logout-btn').addEventListener('click', async () => {
-    await api.logout();
+    try {
+      await api.logout();
+    } catch (e) {
+      clearUserCache();
+    }
     closeModal();
+    clearUserCache();
     toast('Signed out.', 'info');
-    renderAuth();
-    render();
+    renderLanding();
   });
 
   $('#sidebar-toggle').addEventListener('click', () => {
@@ -1819,41 +1959,59 @@ PAGES.student.dashboard = function studentDashboard() {
     : 0;
   const grades = db.grades.filter((g) => g.studentId === user.id && g.status === 'released');
   const avgGrade = grades.length ? Math.round(grades.reduce((s, g) => s + g.score, 0) / grades.length) : null;
+  const lessonsDone = enrollments.reduce((sum, e) => sum + courseProgress(user.id, e.courseId).done, 0);
+  const attempts = db.attempts.filter((a) => a.studentId === user.id);
+  const certificates = enrollments.filter((e) => courseEligibleCert(user.id, e.courseId)).length;
 
-  const continueHtml = active.length ? active.map((e) => {
+  const courseTile = (e) => {
     const c = byId(db.courses, e.courseId);
-    const p = courseProgress(user.id, e.courseId);
+    if (!c) return '';
+    const p = courseProgress(user.id, c.id);
     const nextLesson = lessonsOfCourse(c.id).find((l) => !lessonDone(user.id, l.id) && lessonUnlocked(user.id, c.id, l));
     return `
-      <div class="list-item">
-        <span class="stat-icon">▣</span>
-        <div style="flex:1;min-width:0">
-          <strong>${esc(c.code)} — ${esc(c.title)}</strong>
-          <div class="text-small text-muted">${p.done}/${p.total} lessons · ${nextLesson ? `next: ${esc(nextLesson.title)}` : 'all lessons done'}</div>
+      <article class="card course-card">
+        <div class="course-card-body">
+          <div class="flex items-center justify-between gap-1">
+            <span class="course-code">${esc(c.code)}</span>
+            ${badge(e.status || 'active', e.status === 'completed' ? 'Completed' : 'In progress')}
+          </div>
+          <h3>${esc(c.title)}</h3>
+          <p class="course-desc">${esc(c.desc)}</p>
+          <div class="flex items-center justify-between text-small text-muted">
+            <span>${p.done}/${p.total} lessons complete</span><strong>${p.pct}%</strong>
+          </div>
           ${progressBar(p.pct)}
+          <p class="text-small text-muted mt-2 mb-0">${nextLesson ? `Next: ${esc(nextLesson.title)}` : 'All lessons complete — review anytime.'}</p>
         </div>
-        <button type="button" class="btn btn-sm btn-primary" data-nav="${nextLesson ? 'lesson' : 'course'}" data-id="${nextLesson ? nextLesson.id : c.id}">
-          ${nextLesson ? 'Resume' : 'Review'}</button>
-      </div>`;
-  }).join('') : `<div class="empty-state"><div class="empty-icon">📚</div><h3>No active courses</h3>
-      <p>Browse the catalog and enroll to start learning.</p>
-      <button type="button" class="btn btn-primary" data-nav="catalog">Open catalog</button></div>`;
+        <div class="course-card-foot">
+          <span class="text-small text-muted">${esc(byId(db.users, c.instructorId)?.name || 'Instructor')}</span>
+          <button type="button" class="btn btn-sm btn-primary" data-nav="${nextLesson ? 'lesson' : 'course'}" data-id="${nextLesson ? nextLesson.id : c.id}">
+            ${nextLesson ? 'Continue' : 'Review course'}
+          </button>
+        </div>
+      </article>`;
+  };
 
   const quizItems = [];
   enrollments.forEach((e) => {
+    const course = byId(db.courses, e.courseId);
+    if (!course) return;
     quizzesOfCourse(e.courseId).forEach((q) => {
       if (q.status === 'draft') return;
       const win = quizWindow(q);
       const used = attemptsFor(user.id, q.id).length;
-      if (used >= q.maxAttempts) return;
-      quizItems.push({ q, win, used, course: byId(db.courses, e.courseId) });
+      if (used >= q.maxAttempts || !win.open) return;
+      quizItems.push({ q, win, used, course });
     });
   });
 
+  const notices = db.notices.filter((n) => n.audience === 'all' || n.audience === 'student').slice(0, 3);
+
   return `
     <section class="hero-banner">
-      <h2>Welcome back, ${esc(user.name.split(' ')[0])} 👋</h2>
-      <p>${active.length ? `You have ${active.length} course${active.length > 1 ? 's' : ''} in progress. Keep the momentum going.` : 'Your learning journey starts with one enroll.'}</p>
+      <span class="landing-eyebrow">Student workspace</span>
+      <h2>Welcome back, ${esc(user.name.split(' ')[0])}</h2>
+      <p>${active.length ? `You have ${active.length} course${active.length > 1 ? 's' : ''} in progress. Pick up where you left off.` : 'Your learning journey starts with your first enrollment.'}</p>
       <div class="hero-stats">
         <div class="hero-stat"><b>${enrollments.length}</b><span>Enrolled</span></div>
         <div class="hero-stat"><b>${completed.length}</b><span>Completed</span></div>
@@ -1862,69 +2020,66 @@ PAGES.student.dashboard = function studentDashboard() {
       </div>
     </section>
 
-    <div class="grid-4 mb-3">
-      <div class="card stat-card"><span class="stat-icon">▶</span><div><div class="stat-value">${active.length}</div><div class="stat-label">In progress</div></div></div>
-      <div class="card stat-card"><span class="stat-icon">✅</span><div><div class="stat-value">${completed.length}</div><div class="stat-label">Completed</div></div></div>
-      <div class="card stat-card"><span class="stat-icon">✎</span><div><div class="stat-value">${db.attempts.filter((a) => a.studentId === user.id).length}</div><div class="stat-label">Quiz attempts</div></div></div>
-      <div class="card stat-card"><span class="stat-icon">◎</span><div><div class="stat-value">${enrollments.filter((e) => courseEligibleCert(user.id, e.courseId)).length}</div><div class="stat-label">Certificates</div></div></div>
-    </div>
+    <div class="dashboard-grid">
+      <div class="dashboard-main">
+        <div>
+          <div class="dashboard-panel-title">
+            <h3 class="section-title" style="margin:0">Continue learning</h3>
+            <button type="button" class="btn btn-sm btn-ghost" data-nav="my-courses">View all courses</button>
+          </div>
+          <div class="dashboard-course-grid">
+            ${active.length ? active.map(courseTile).join('') : `<div class="card empty-state"><div class="empty-icon">▤</div>
+              <h3>No active courses</h3><p>Browse the catalog and enroll to start learning.</p>
+              <button type="button" class="btn btn-primary" data-nav="catalog">Open catalog</button></div>`}
+          </div>
+        </div>
 
-    <div class="detail-grid">
-      <div>
-        <h3 class="section-title" style="margin-top:0">Continue learning</h3>
-        <div class="card">${continueHtml}</div>
-
-        <h3 class="section-title">Open quizzes</h3>
         <div class="card">
-          ${quizItems.length ? quizItems.map(({ q, win, used, course }) => `
+          <div class="dashboard-panel-title"><h3>Available quizzes</h3><span class="text-small text-muted">${quizItems.length} ready</span></div>
+          ${quizItems.length ? quizItems.map(({ q, used, course }) => `
             <div class="list-item">
               <span class="stat-icon">✎</span>
               <div style="flex:1;min-width:0">
                 <strong>${esc(q.title)}</strong>
                 <div class="text-small text-muted">${esc(course.code)} · ${q.questions.length} questions · ${q.timeLimitMin} min · attempts ${used}/${q.maxAttempts}</div>
               </div>
-              ${win.open ? badge('active', 'Open') : badge(q.status === 'upcoming' ? 'upcoming' : 'draft', win.open ? 'Open' : q.status === 'upcoming' ? 'Upcoming' : 'Closed')}
-              ${win.open ? `<button type="button" class="btn btn-sm btn-primary" data-nav="take" data-id="${q.id}">Attempt</button>` : ''}
-            </div>`).join('') : '<p class="text-muted mb-0">No open quizzes right now. Enroll in more courses to see quizzes here.</p>'}
+              ${badge('active', 'Open')}
+              <button type="button" class="btn btn-sm btn-primary" data-nav="take" data-id="${q.id}">Attempt</button>
+            </div>`).join('') : '<p class="text-muted mb-0">No quizzes are open right now. Enroll in more courses to see quizzes here.</p>'}
         </div>
       </div>
 
-      <div>
-        <h3 class="section-title" style="margin-top:0">Announcements</h3>
+      <aside class="dashboard-side">
         <div class="card">
-          ${db.notices.filter((n) => n.audience === 'all' || n.audience === 'student').slice(0, 3).map((n) => `
-            <div class="list-item" style="align-items:flex-start">
-              <span class="stat-icon">📢</span>
-              <div><strong>${esc(n.title)}</strong>
-                <div class="text-small text-muted">${esc(n.body)}</div>
-                <small>${fmtDate(n.createdAt)} · ${esc(n.author)}</small></div>
-            </div>`).join('')}
+          <div class="dashboard-panel-title"><h3>Learning summary</h3></div>
+          <div class="kv-row"><span>Lessons completed</span><strong>${lessonsDone}</strong></div>
+          <div class="kv-row"><span>Quiz attempts</span><strong>${attempts.length}</strong></div>
+          <div class="kv-row"><span>Released grades</span><strong>${grades.length}</strong></div>
+          <div class="kv-row"><span>Certificates earned</span><strong>${certificates}</strong></div>
+          <button type="button" class="btn btn-outline btn-block mt-2" data-nav="catalog">Browse catalog</button>
         </div>
 
-        <h3 class="section-title">Latest results</h3>
         <div class="card">
-          ${(() => {
-            const mine = db.attempts.filter((a) => a.studentId === user.id).sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)).slice(0, 4);
-            return mine.length ? mine.map((a) => {
-              const q = byId(db.quizzes, a.quizId);
-              return `<div class="list-item"><div style="flex:1">
-                <strong>${esc(q ? q.title : 'Quiz')}</strong>
-                <div class="text-small text-muted">${fmtDate(a.submittedAt)}</div></div>
-                <span class="badge badge-${a.passed ? 'success' : 'danger'}">${a.percentage}%</span></div>`;
-            }).join('') : '<p class="text-muted mb-0">No quiz attempts yet.</p>';
-          })()}
-        </div>
-
-        <h3 class="section-title">Released grades</h3>
-        <div class="card">
+          <div class="dashboard-panel-title"><h3>Released grades</h3><button type="button" class="link-button" data-nav="grades">View all</button></div>
           ${grades.length ? grades.slice(0, 4).map((g) => {
             const c = byId(db.courses, g.courseId);
-            return `<div class="list-item"><div style="flex:1"><strong>${esc(c.code)}</strong>
+            return `<div class="list-item"><div style="flex:1"><strong>${esc(c ? c.code : 'Course')}</strong>
               <div class="text-small text-muted">${fmtDate(g.publishedAt)}</div></div>
               <span class="badge badge-success">${g.score} · ${g.letter}</span></div>`;
           }).join('') : '<p class="text-muted mb-0">No published grades yet.</p>'}
         </div>
-      </div>
+
+        <div class="card">
+          <div class="dashboard-panel-title"><h3>Announcements</h3><button type="button" class="link-button" data-nav="notifications">Inbox</button></div>
+          ${notices.length ? notices.map((n) => `
+            <div class="list-item" style="align-items:flex-start">
+              <span class="stat-icon">▤</span>
+              <div><strong>${esc(n.title)}</strong>
+                <div class="text-small text-muted">${esc(n.body)}</div>
+                <small>${fmtDate(n.createdAt)} · ${esc(n.author)}</small></div>
+            </div>`).join('') : '<p class="text-muted mb-0">No announcements right now.</p>'}
+        </div>
+      </aside>
     </div>`;
 };
 
@@ -1933,6 +2088,13 @@ PAGES.student.catalog = function studentCatalog() {
   const cats = [...new Set(db.courses.map((c) => c.category))];
   const levels = [...new Set(db.courses.map((c) => c.level))];
   const visible = db.courses.filter((c) => c.status === 'published' || isEnrolled(user.id, c.id));
+  afterRender(() => {
+    const qEl = $('#catalog-q');
+    const catEl = $('#catalog-cat');
+    if (qEl && state.query.q) qEl.value = state.query.q;
+    if (catEl && state.query.cat) catEl.value = state.query.cat;
+    applyCatalogFilter();
+  });
   return `
     <div class="page-head">
       <div><h2>Course Catalog</h2><p>${visible.length} courses available · enroll to unlock lessons and quizzes.</p></div>
@@ -2248,18 +2410,18 @@ PAGES.take = function takeQuizPage() {
 
 PAGES.student.grades = function studentGrades() {
   const user = session.user;
-  const grades = db.grades.filter((g) => g.studentId === user.id);
+  const grades = db.grades.filter((g) => g.studentId === user.id && g.status === 'released');
   const attempts = db.attempts.filter((a) => a.studentId === user.id)
     .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
   const released = grades.filter((g) => g.status === 'released');
   const avg = released.length ? Math.round(released.reduce((s, g) => s + g.score, 0) / released.length) : null;
 
   return `
-    <div class="page-head"><div><h2>My Grades</h2><p>Released grades are final until the instructor re-publishes them.</p></div></div>
+    <div class="page-head"><div><h2>My Grades</h2><p>Only released grades are shown.</p></div></div>
     <div class="grid-3 mb-3">
       <div class="card stat-card"><span class="stat-icon">▥</span><div><div class="stat-value">${released.length}</div><div class="stat-label">Released</div></div></div>
-      <div class="card stat-card"><span class="stat-icon">✎</span><div><div class="stat-value">${grades.filter((g) => g.status === 'draft').length}</div><div class="stat-label">Awaiting release</div></div></div>
       <div class="card stat-card"><span class="stat-icon">★</span><div><div class="stat-value">${avg === null ? '—' : avg}</div><div class="stat-label">Average (released)</div></div></div>
+      <div class="card stat-card"><span class="stat-icon">✎</span><div><div class="stat-value">${attempts.length}</div><div class="stat-label">Attempts</div></div></div>
     </div>
 
     <div class="card mb-3">
@@ -2269,12 +2431,12 @@ PAGES.student.grades = function studentGrades() {
         <tbody>${grades.map((g) => {
           const c = byId(db.courses, g.courseId);
           return `<tr>
-            <td><strong>${esc(c.code)}</strong> ${esc(c.title)}</td>
-            <td>${g.score}</td><td><strong>${g.letter}</strong></td>
-            <td>${badge(g.status, g.status === 'released' ? 'Released' : 'Draft')}</td>
-            <td>${fmtDate(g.publishedAt) || '—'}</td>
+            <td><strong>${esc(c ? c.code : '')}</strong> ${esc(c ? c.title : '')}</td>
+            <td>${g.score}</td><td><strong>${g.letter || ''}</strong></td>
+            <td>${badge('released', 'Released')}</td>
+            <td>${fmtDate(g.publishedAt) || fmtDate(g.createdAt) || '—'}</td>
             <td>${esc(g.feedback || '—')}</td></tr>`;
-        }).join('')}</tbody></table></div>` : '<p class="text-muted mb-0">No grades recorded yet.</p>'}
+        }).join('')}</tbody></table></div>` : '<p class="text-muted mb-0">No released grades yet.</p>'}
     </div>
 
     <div class="card">
@@ -2362,35 +2524,26 @@ PAGES.instructor.dashboard = function instructorDashboard() {
       </div>
     </section>
 
-    <div class="grid-4 mb-3">
+    <div class="quick-stat-grid mb-3">
       <div class="card stat-card"><span class="stat-icon">▤</span><div><div class="stat-value">${courses.filter((c) => c.status === 'published').length}</div><div class="stat-label">Published</div></div></div>
       <div class="card stat-card"><span class="stat-icon">✎</span><div><div class="stat-value">${attempts.length}</div><div class="stat-label">Quiz attempts</div></div></div>
       <div class="card stat-card"><span class="stat-icon">▥</span><div><div class="stat-value">${draftGrades.length}</div><div class="stat-label">Draft grades</div></div></div>
       <div class="card stat-card"><span class="stat-icon">◔</span><div><div class="stat-value">${avgProgress}%</div><div class="stat-label">Class progress</div></div></div>
     </div>
 
-    <div class="detail-grid">
-      <div>
-        <h3 class="section-title" style="margin-top:0">My courses</h3>
-        <div class="course-grid">
-          ${courses.map((c) => courseCard(c, { mode: 'instructor' })).join('') || '<p class="text-muted">No courses yet — create one.</p>'}
+    <div class="dashboard-grid">
+      <div class="dashboard-main">
+        <div>
+          <div class="dashboard-panel-title">
+            <h3 class="section-title" style="margin:0">My courses</h3>
+            <button type="button" class="btn btn-sm btn-ghost" data-nav="teach-courses">Manage courses</button>
+          </div>
+          <div class="course-grid">
+            ${courses.map((c) => courseCard(c, { mode: 'instructor' })).join('') || '<p class="text-muted">No courses yet — create one.</p>'}
+          </div>
         </div>
-      </div>
-      <div>
-        <h3 class="section-title" style="margin-top:0">Needs attention</h3>
         <div class="card">
-          ${draftGrades.length ? draftGrades.map((g) => {
-            const s = byId(db.users, g.studentId), c = byId(db.courses, g.courseId);
-            return `<div class="list-item"><div style="flex:1"><strong>${esc(s.name)}</strong>
-              <div class="text-small text-muted">${esc(c.code)} · draft ${g.score}</div></div>
-              <button type="button" class="btn btn-sm btn-outline" data-act="open-grade" data-student="${g.studentId}" data-course="${g.courseId}">Publish</button></div>`;
-          }).join('') : '<p class="text-muted mb-0">No draft grades waiting.</p>'}
-          <div class="dropdown-divider"></div>
-          <button type="button" class="btn btn-sm btn-primary btn-block" data-nav="gradebook">Open gradebook</button>
-        </div>
-
-        <h3 class="section-title">Recent actions</h3>
-        <div class="card">
+          <div class="dashboard-panel-title"><h3>Recent actions</h3></div>
           ${myAudit.length ? myAudit.map((a) => `
             <div class="list-item"><div style="flex:1"><strong>${esc(a.action)}</strong>
               <div class="text-small text-muted">${esc(a.detail)}</div></div>
@@ -2398,6 +2551,19 @@ PAGES.instructor.dashboard = function instructorDashboard() {
             : '<p class="text-muted mb-0">Actions you take will be logged here.</p>'}
         </div>
       </div>
+      <aside class="dashboard-side">
+        <div class="card">
+          <div class="dashboard-panel-title"><h3>Needs attention</h3><span class="badge badge-warning">${draftGrades.length} draft</span></div>
+          ${draftGrades.length ? draftGrades.map((g) => {
+            const s = byId(db.users, g.studentId), c = byId(db.courses, g.courseId);
+            return `<div class="list-item"><div style="flex:1"><strong>${esc(s ? s.name : 'Student')}</strong>
+              <div class="text-small text-muted">${esc(c ? c.code : 'Course')} · draft ${g.score}</div></div>
+              <button type="button" class="btn btn-sm btn-outline" data-act="open-grade" data-student="${g.studentId}" data-course="${g.courseId}">Publish</button></div>`;
+          }).join('') : '<p class="text-muted mb-0">No draft grades waiting.</p>'}
+          <div class="dropdown-divider"></div>
+          <button type="button" class="btn btn-sm btn-primary btn-block" data-nav="gradebook">Open gradebook</button>
+        </div>
+      </aside>
     </div>`;
 };
 
@@ -2618,8 +2784,10 @@ function barChart(items) {
 PAGES.admin.dashboard = function adminDashboard() {
   const students = db.users.filter((u) => u.role === 'student');
   const instructors = db.users.filter((u) => u.role === 'instructor');
+  const admins = db.users.filter((u) => u.role === 'admin');
   const activeEnr = db.enrollments.filter((e) => e.status !== 'dropped');
   const released = db.grades.filter((g) => g.status === 'released');
+  const draftGrades = db.grades.filter((g) => g.status === 'draft');
   const avgGrade = released.length ? Math.round(released.reduce((s, g) => s + g.score, 0) / released.length) : null;
   const perCourse = db.courses.slice(0, 6).map((c) => ({
     label: c.code, value: enrollmentsOfCourse(c.id).filter((e) => e.status !== 'dropped').length,
@@ -2627,8 +2795,9 @@ PAGES.admin.dashboard = function adminDashboard() {
 
   return `
     <section class="hero-banner">
+      <span class="landing-eyebrow">Administrator workspace</span>
       <h2>Platform overview</h2>
-      <p>Full-stack-style supervision of the MiniLMS demo dataset stored in localStorage.</p>
+      <p>Live, role-scoped oversight of the MiniLMS users, courses, enrollments and grades stored in MySQL.</p>
       <div class="hero-stats">
         <div class="hero-stat"><b>${db.users.length}</b><span>Users</span></div>
         <div class="hero-stat"><b>${db.courses.length}</b><span>Courses</span></div>
@@ -2637,44 +2806,52 @@ PAGES.admin.dashboard = function adminDashboard() {
       </div>
     </section>
 
-    <div class="grid-4 mb-3">
+    <div class="quick-stat-grid mb-3">
       <div class="card stat-card"><span class="stat-icon">✿</span><div><div class="stat-value">${students.filter((s) => s.status === 'active').length}</div><div class="stat-label">Active students</div></div></div>
       <div class="card stat-card"><span class="stat-icon">★</span><div><div class="stat-value">${instructors.length}</div><div class="stat-label">Instructors</div></div></div>
-      <div class="card stat-card"><span class="stat-icon">▥</span><div><div class="stat-value">${db.grades.filter((g) => g.status === 'draft').length}</div><div class="stat-label">Draft grades</div></div></div>
+      <div class="card stat-card"><span class="stat-icon">▥</span><div><div class="stat-value">${draftGrades.length}</div><div class="stat-label">Draft grades</div></div></div>
       <div class="card stat-card"><span class="stat-icon">☰</span><div><div class="stat-value">${db.audit.length}</div><div class="stat-label">Audit entries</div></div></div>
     </div>
 
-    <div class="detail-grid">
-      <div class="card">
-        <div class="card-header"><h3>Enrollments per course</h3><span class="card-title-sub">live counts</span></div>
-        ${barChart(perCourse)}
+    <div class="dashboard-grid">
+      <div class="dashboard-main">
+        <div class="card">
+          <div class="dashboard-panel-title"><h3>Enrollments per course</h3><span class="text-small text-muted">live counts</span></div>
+          ${barChart(perCourse)}
+        </div>
+        <div class="card">
+          <div class="dashboard-panel-title"><h3>Latest audit entries</h3><button type="button" class="link-button" data-nav="audit">Full log</button></div>
+          ${db.audit.slice(0, 6).map((a) => `
+            <div class="list-item"><div style="flex:1">
+              <strong>${esc(a.actorName)}</strong> <span class="text-muted">${esc(a.action)}</span>
+              <div class="text-small text-muted">${esc(a.detail)}</div></div>
+              <small>${timeAgo(a.at)}</small></div>`).join('') || '<p class="text-muted mb-0">No audit entries.</p>'}
+        </div>
       </div>
-      <div>
-        <div class="card mb-3">
-          <div class="card-header"><h3>Course status</h3></div>
+      <aside class="dashboard-side">
+        <div class="card">
+          <div class="dashboard-panel-title"><h3>Course status</h3></div>
           ${['published', 'draft', 'archived'].map((s) => {
             const n = db.courses.filter((c) => c.status === s).length;
             return `<div class="kv-row"><span>${badge(s, s)}</span><span>${n}</span></div>`;
           }).join('')}
         </div>
         <div class="card">
-          <div class="card-header"><h3>Quick actions</h3></div>
-          <div class="btn-group">
+          <div class="dashboard-panel-title"><h3>User mix</h3></div>
+          <div class="kv-row"><span>Students</span><strong>${students.length}</strong></div>
+          <div class="kv-row"><span>Instructors</span><strong>${instructors.length}</strong></div>
+          <div class="kv-row"><span>Administrators</span><strong>${admins.length}</strong></div>
+          <button type="button" class="btn btn-outline btn-block mt-2" data-nav="users">Manage users</button>
+        </div>
+        <div class="card">
+          <div class="dashboard-panel-title"><h3>Quick actions</h3></div>
+          <div class="btn-group vertical">
             <button type="button" class="btn btn-sm btn-primary" data-act="open-create-user">+ Add user</button>
-            <button type="button" class="btn btn-sm" data-nav="audit">Audit log</button>
-            <button type="button" class="btn btn-sm btn-warning" data-act="reset-demo">Reset demo data</button>
+            <button type="button" class="btn btn-sm" data-nav="courses">Course oversight</button>
+            <button type="button" class="btn btn-sm" data-nav="enrollments">Enrollments</button>
           </div>
         </div>
-      </div>
-    </div>
-
-    <h3 class="section-title">Latest audit entries</h3>
-    <div class="card">
-      ${db.audit.slice(0, 6).map((a) => `
-        <div class="list-item"><div style="flex:1">
-          <strong>${esc(a.actorName)}</strong> <span class="text-muted">${esc(a.action)}</span>
-          <div class="text-small text-muted">${esc(a.detail)}</div></div>
-          <small>${timeAgo(a.at)}</small></div>`).join('') || '<p class="text-muted mb-0">No audit entries.</p>'}
+      </aside>
     </div>`;
 };
 
@@ -3361,6 +3538,12 @@ function flagInvalid(input, message) {
 }
 
 const ACTIONS = {
+  'open-login': (el) => {
+    const area = el?.dataset?.area || '';
+    PENDING_CATALOG = area ? { q: area, cat: '' } : null;
+    openLogin(area ? `Sign in to search the live catalog for “${area}”.` : '');
+  },
+  'close-login': () => renderLanding(),
   'close-modal': () => { if (state.quiz) stopQuizTimer(); closeModal(); },
   'cancel-quiz': () => {
     if (confirmDialog('Leave the quiz? Unsubmitted answers will be lost.')) {
@@ -3750,6 +3933,7 @@ async function init() {
 
   wireAuth();
   wireShell();
+  wireLanding();
 
   window.addEventListener('hashchange', () => {
     render();
@@ -3780,9 +3964,12 @@ async function init() {
     if (route.page) render();
     else navigate(ROLE_HOME[session.user.role]);
     if (!route.page) render();
-  } else {
+  } else if (AUTH_NOTICE) {
+    const notice = AUTH_NOTICE;
     renderAuth();
-    render();
+    toast(notice, 'warning');
+  } else {
+    renderLanding();
   }
 }
 
