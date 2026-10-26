@@ -1,19 +1,4 @@
-/* ==========================================================================
-   MiniLMS — script.js
-   LMS frontend: hash-based routing and three role workspaces
-   (student / instructor / admin).
-   Data comes from the MiniLMS backend (Express + MySQL) through fetch():
-     - server-backed collections (users, courses, modules, lessons,
-       enrollments, quizzes, attempts, grades) are loaded from /api/bootstrap
-     - fields with no MySQL column (course category/level/credits/prereqs,
-       lesson type/duration, quiz questions/passMark, attempt answers,
-       grade feedback, profile dept/phone/bio) are stored in the browser
-       overlay key minilms_ext_v1 - they are DISPLAY-ONLY, not shared data
-     - notifications/audit/activity/notices/progress stay in localStorage
-       (the schema has no tables for them)
-   If the backend is unreachable the app falls back to the last cached
-   snapshot (or the original built-in demo seed) and shows a warning.
-   ========================================================================== */
+
 'use strict';
 
 /* ============================ 1. Utilities ============================== */
@@ -3522,7 +3507,7 @@ function openUserForm(userId) {
   openModal({ title: user ? `Edit ${user.name}` : 'Create user', body, large: true });
 }
 
-/* ======================= 18. Actions ==================================== */
+
 function flagInvalid(input, message) {
   if (!input) return;
   input.classList.add('is-invalid');
@@ -3677,7 +3662,7 @@ const ACTIONS = {
   },
 };
 
-/* ======================= 19. Form submissions =========================== */
+
 const FORMS = {
   async course(form) {
     const fd = new FormData(form);
@@ -3831,7 +3816,7 @@ const FORMS = {
   },
 };
 
-/* ======================= 20. Event delegation =========================== */
+
 function handleClickDelegates(e) {
   const navEl = e.target.closest('[data-nav]');
   if (navEl && navEl.dataset.nav) {
@@ -3921,7 +3906,7 @@ function handleChangeDelegates(e) {
   }
 }
 
-/* ======================= 21. Init ======================================= */
+
 async function init() {
   await store.load();
 

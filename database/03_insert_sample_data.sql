@@ -1,20 +1,7 @@
--- ============================================================
--- 03_insert_sample_data.sql
--- Project : MiniLMS - CSL0311 DBMS PBL
--- Purpose : Loads clearly fictional demo data into MiniLMS.
--- Notes   :
---   * Explicit IDs are used so the foreign keys are easy to read.
---   * PasswordHash values are FAKE placeholders, not real hashes
---     and not real credentials. Replace them server-side later.
---   * All e-mails use @example.com (a reserved, fictional domain).
---   * Every row respects the constraints defined in file 02.
--- ============================================================
+
 
 USE MiniLMS;
 
--- ------------------------------------------------------------
--- SECTION 1 : USERS (1 admin, 3 instructors, 8 students)
--- ------------------------------------------------------------
 INSERT INTO Users (UserID, Name, Email, PasswordHash, Role, Status, CreatedAt) VALUES
 (1,  'Priya Sharma', 'priya.sharma@example.com',   '$2y$10$PLACEHOLDER_HASH_DEMO_ONLY_NOT_A_REAL_CREDENTIAL', 'Admin',     'Active', '2026-06-01 09:00:00'),
 (2,  'Ananya Iyer',  'ananya.iyer@example.com',    '$2y$10$PLACEHOLDER_HASH_DEMO_ONLY_NOT_A_REAL_CREDENTIAL', 'Instructor','Active', '2026-06-05 09:00:00'),
@@ -29,12 +16,7 @@ INSERT INTO Users (UserID, Name, Email, PasswordHash, Role, Status, CreatedAt) V
 (11, 'Vikram Reddy', 'vikram.reddy@example.com',   '$2y$10$PLACEHOLDER_HASH_DEMO_ONLY_NOT_A_REAL_CREDENTIAL', 'Student',   'Active', '2026-07-23 10:00:00'),
 (12, 'Isha Kapoor',  'isha.kapoor@example.com',    '$2y$10$PLACEHOLDER_HASH_DEMO_ONLY_NOT_A_REAL_CREDENTIAL', 'Student',   'Inactive','2026-07-23 10:00:00'),
 (13, 'Neel Chandra', 'neel.chandra@example.com',   '$2y$10$PLACEHOLDER_HASH_DEMO_ONLY_NOT_A_REAL_CREDENTIAL', 'Student',   'Active', '2026-07-24 10:00:00');
--- Note: user 13 (Neel Chandra) deliberately has NO enrollment,
--- so query Q8 in 04_queries.sql returns at least one row.
 
--- ------------------------------------------------------------
--- SECTION 2 : COURSES (3 courses, each with an instructor)
--- ------------------------------------------------------------
 INSERT INTO Courses (CourseID, CourseCode, Title, Description, InstructorID, Status, CreatedAt) VALUES
 (1, 'DB-101', 'Database Management Systems',
     'Relational modelling, SQL, normalisation and transactions.', 2, 'Published', '2026-07-01 09:00:00'),
@@ -43,9 +25,7 @@ INSERT INTO Courses (CourseID, CourseCode, Title, Description, InstructorID, Sta
 (3, 'PY-110', 'Programming with Python',
     'Variables, control flow, functions, collections and files.', 4, 'Published', '2026-07-03 09:00:00');
 
--- ------------------------------------------------------------
--- SECTION 3 : MODULES (two modules per course)
--- ------------------------------------------------------------
+
 INSERT INTO Modules (ModuleID, CourseID, Title, Description, SequenceNo) VALUES
 (1, 1, 'Relational Foundations', 'Entities, keys and integrity rules.',        1),
 (2, 1, 'SQL and Normalisation',   'Queries, joins and normal forms.',           2),
@@ -54,10 +34,7 @@ INSERT INTO Modules (ModuleID, CourseID, Title, Description, SequenceNo) VALUES
 (5, 3, 'Language Basics',         'Syntax, conditionals, loops and functions.', 1),
 (6, 3, 'Working with Data',       'Collections, files and exceptions.',         2);
 
--- ------------------------------------------------------------
--- SECTION 4 : LESSONS (14 lessons in total)
---    ReleaseDate in the past = already released to students.
--- ------------------------------------------------------------
+
 INSERT INTO Lessons (LessonID, ModuleID, Title, Content, SequenceNo, ReleaseDate) VALUES
 (1,  1, 'Introduction to Databases', 'What a database is and why we use one.',            1, '2026-08-03 09:00:00'),
 (2,  1, 'ER Modelling',              'Entities, attributes, relationships, cardinality.', 2, '2026-08-05 09:00:00'),
@@ -74,10 +51,7 @@ INSERT INTO Lessons (LessonID, ModuleID, Title, Content, SequenceNo, ReleaseDate
 (13, 6, 'Lists and Dictionaries',    'Choosing and using built-in containers.',           1, '2026-08-11 09:00:00'),
 (14, 6, 'File Handling',             'Reading and writing files safely.',                 2, NULL);
 
--- ------------------------------------------------------------
--- SECTION 5 : ENROLLMENTS
---    Unique pairs only - no student appears twice in one course.
--- ------------------------------------------------------------
+
 INSERT INTO Enrollments (EnrollmentID, UserID, CourseID, EnrollDate, Status) VALUES
 (1,  5,  1, '2026-08-01 10:00:00', 'Active'),
 (2,  6,  1, '2026-08-01 10:00:00', 'Completed'),
@@ -91,21 +65,14 @@ INSERT INTO Enrollments (EnrollmentID, UserID, CourseID, EnrollDate, Status) VAL
 (10, 6,  3, '2026-08-04 10:00:00', 'Active'),
 (11, 12, 3, '2026-08-05 10:00:00', 'Dropped');
 
--- ------------------------------------------------------------
--- SECTION 6 : QUIZZES (4 quizzes, all scores within limits)
--- ------------------------------------------------------------
+
 INSERT INTO Quizzes (QuizID, CourseID, Title, MaxScore, MaxAttempts, AvailableFrom, AvailableUntil, Status) VALUES
 (1, 1, 'RDBMS Fundamentals',     10, 3, '2026-09-01 00:00:00', '2026-12-15 23:59:00', 'Published'),
 (2, 1, 'Normalisation Practice',  5, 2, '2026-11-01 00:00:00', '2026-12-20 23:59:00', 'Draft'),
 (3, 2, 'HTML and CSS Basics',     8, 2, '2026-09-10 00:00:00', '2026-12-10 23:59:00', 'Published'),
 (4, 3, 'Python Basics',          10, 3, '2026-09-05 00:00:00', '2026-12-12 23:59:00', 'Published');
 
--- ------------------------------------------------------------
--- SECTION 7 : ATTEMPTS
---    Rule checks: attempt numbers are unique per (quiz, student);
---    every score is >= 0 and <= the quiz MaxScore.
---    Attempt 5 is still in progress, so its Score is NULL.
--- ------------------------------------------------------------
+
 INSERT INTO Attempts (AttemptID, QuizID, StudentID, AttemptNo, Score, SubmittedAt, Status) VALUES
 (1, 1, 5,  1, 8.00, '2026-09-12 10:05:00', 'Submitted'),
 (2, 1, 5,  2, 9.00, '2026-09-14 11:00:00', 'Submitted'),
@@ -114,16 +81,11 @@ INSERT INTO Attempts (AttemptID, QuizID, StudentID, AttemptNo, Score, SubmittedA
 (5, 4, 10, 1, NULL, NULL,                   'In Progress'),
 (6, 4, 11, 1, 9.50, '2026-09-20 09:45:00', 'Submitted');
 
--- ------------------------------------------------------------
--- SECTION 8 : GRADES
---    One grade per attempt (AttemptID is unique).
---    Every GradeValue is <= the MaxScore of the related quiz.
--- ------------------------------------------------------------
 INSERT INTO Grades (GradeID, AttemptID, GradedBy, GradeValue, Status, GradedAt) VALUES
 (1, 1, 2, 8.00, 'Published', '2026-09-13 09:00:00'),
 (2, 3, 2, 7.50, 'Published', '2026-09-13 09:30:00'),
 (3, 4, 3, 6.00, 'Draft',     '2026-09-19 16:00:00'),
 (4, 6, 4, 9.50, 'Published', '2026-09-21 12:00:00');
 
--- Quick confirmation of what was inserted.
+
 SELECT 'Sample data loaded.' AS Result;

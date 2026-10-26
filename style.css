@@ -1,10 +1,4 @@
-/* ==========================================================================
-   MiniLMS — style.css
-   Design system: blue/purple palette, cards, sidebar layout, dark mode.
-   All styling is hand-written CSS3 (no frameworks).
-   ========================================================================== */
 
-/* ------------------------------ 1. Tokens ------------------------------- */
 :root {
   /* Brand palette */
   --blue-700: #1e40af;

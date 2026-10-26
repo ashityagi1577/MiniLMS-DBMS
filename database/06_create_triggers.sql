@@ -3,7 +3,7 @@ USE MiniLMS;
 
 DELIMITER $$
 
--- 1. Check that the assigned course owner is an instructor
+
 CREATE TRIGGER trg_Courses_CheckInstructor
 BEFORE INSERT ON Courses
 FOR EACH ROW
@@ -20,7 +20,7 @@ BEGIN
     END IF;
 END$$
 
--- 2. Prevent an attempt score from exceeding quiz maximum
+
 CREATE TRIGGER trg_Attempts_CheckScore
 BEFORE INSERT ON Attempts
 FOR EACH ROW
@@ -37,7 +37,6 @@ BEGIN
     END IF;
 END$$
 
--- 3. Prevent a grade from exceeding quiz maximum
 CREATE TRIGGER trg_Grades_CheckValue
 BEFORE INSERT ON Grades
 FOR EACH ROW
