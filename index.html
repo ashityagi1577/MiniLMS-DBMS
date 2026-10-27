@@ -219,21 +219,75 @@
 
       <div id="auth-notice" class="auth-notice" role="status" hidden></div>
 
-      <form id="login-form" novalidate>
-        <div class="form-group">
-          <label for="login-email">Email</label>
-          <select id="login-email" class="form-control" required aria-describedby="login-email-hint">
-            <option value="">Choose a demo account&hellip;</option>
-          </select>
-          <small id="login-email-hint" class="form-hint">Demo accounts are configured locally in <code>script.js</code> (DEMO_ACCOUNTS); the server verifies every sign-in.</small>
-        </div>
-        <div class="form-group">
-          <label for="login-password">Password</label>
-          <input type="password" id="login-password" class="form-control" value="demo123" autocomplete="off" required>
-          <small class="form-hint">All demo accounts use the password <code>demo123</code>.</small>
-        </div>
-        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
-      </form>
+
+<form id="login-form" novalidate>
+  <div class="form-group">
+    <label for="login-email">User ID</label>
+    <input
+      type="number"
+      id="login-email"
+      class="form-control"
+      placeholder="Enter your User ID"
+      autocomplete="username"
+      required
+    >
+  </div>
+
+  <div class="form-group">
+    <label for="login-password">Password</label>
+    <input
+      type="password"
+      id="login-password"
+      class="form-control"
+      placeholder="Enter your password"
+      autocomplete="current-password"
+      required
+    >
+  </div>
+
+  <button type="submit" class="btn btn-primary btn-block">
+    Sign In
+  </button>
+</form>
+
+<p class="auth-footnote">
+  Sign in using the User ID and password assigned to your account.
+  Your dashboard will open according to your registered role.
+</p>
+
+<div class="role-cards" id="role-cards">
+  <button type="button" class="role-card" data-role="student">
+    <span class="role-icon" aria-hidden="true">&#9998;</span>
+    <span class="role-name">Student</span>
+    <span class="role-desc">
+      Browse courses, take quizzes, track grades
+    </span>
+  </button>
+
+  <button type="button" class="role-card" data-role="instructor">
+    <span class="role-icon" aria-hidden="true">&#9733;</span>
+    <span class="role-name">Instructor</span>
+    <span class="role-desc">
+      Create courses, modules, quizzes and grades
+    </span>
+  </button>
+
+  <button type="button" class="role-card" data-role="admin">
+    <span class="role-icon" aria-hidden="true">&#9881;</span>
+    <span class="role-name">Admin</span>
+    <span class="role-desc">
+      Manage users, oversight and audit log
+    </span>
+  </button>
+</div>
+
+<p class="auth-footnote">
+  Connected to the MiniLMS Node.js backend and MySQL.
+  Sign-ins use real password checks; demo accounts use
+  the password demo123.
+</p>
+
+
 
       <div class="auth-divider"><span>or enter instantly as</span></div>
 

@@ -704,248 +704,49 @@ async function syncFromServer() {
   store.save();
 }
 
-/* ------------------------------ store ----------------------------------- */
-let db = null;
 
-const store = {
-  /**
-   * Boot order:
-   *  1. read the localStorage snapshot (keeps MySQL-less collections)
-   *  2. valid token  -> GET /api/bootstrap (full MySQL dataset)
-   *     no token     -> GET /api/health (public reachability check only;
-   *                     the login-screen account choices come from the
-   *                     local DEMO_ACCOUNTS config, never from the server)
-   *  3. backend down -> cached snapshot, else the original demo seed
-   */
-  async load() {
-    loadOverlays();
-    const token = localStorage.getItem(TOKEN_KEY);
-    const owner = localStorage.getItem(SESSION_KEY) || '';
-    db = null;
+async login(userId, password) {
+  clearUserCache();
 
-    if (token && owner) {
-      const res = await apiFetch('/api/bootstrap');
-      if (res.ok) {
-        OFFLINE = false;
-        applyServerData(res);
-        store.save();
-        return;
-      }
-      if (res.status === 401 || res.status === 403) {
-        clearUserCacheStorage();
-        AUTH_NOTICE = 'Your session expired or is no longer valid. Please sign in again.';
-        return;
-      }
-      // Network/server failure: only restore the snapshot belonging to this user.
-      try {
-        const raw = localStorage.getItem(dbCacheKey(owner));
-        const cached = raw ? JSON.parse(raw) : null;
-        if (cached && typeof cached === 'object' && Array.isArray(cached.users)) {
-          db = cached;
-          ['progress', 'notifications', 'audit', 'activity', 'notices', 'gradeHistory'].forEach((k) => {
-            if (!Array.isArray(db[k])) db[k] = [];
-          });
-          OFFLINE = true;
-          return;
-        }
-      } catch (err) { db = null; }
-      AUTH_NOTICE = 'Could not load your account data. Check the backend connection and try again.';
-      return;
+  const res = await apiFetch('/api/auth/login', {
+    method: 'POST',
+    body: {
+      userId: userId.trim(),
+      password
     }
-
-    if (owner || token) clearUserCacheStorage(); // orphaned/incomplete session
-    const health = await apiFetch('/api/health');
-    OFFLINE = !health.ok;
-  },
-
-  save() {
-    const key = dbCacheKey();
-    if (!db || !key) return;
-    try { localStorage.setItem(key, JSON.stringify(db)); } catch (err) { console.warn('localStorage save failed', err); }
-  },
-
-  reset() {
-    clearUserCacheStorage();
-    try { localStorage.removeItem(EXT_KEY); } catch (err) { /* ignore */ }
-    session.clear();
-    db = null;
-  },
-};
-
-const session = {
-  get user() {
-    if (!db || !Array.isArray(db.users)) return null;
-    const id = localStorage.getItem(SESSION_KEY);
-    return id ? byId(db.users, id) : null;
-  },
-  set(userId) { localStorage.setItem(SESSION_KEY, String(userId)); },
-  clear() { localStorage.removeItem(SESSION_KEY); },
-};
-
-/* ======================== 4. Domain helpers ============================= */
-const modulesOf = (courseId) => db.modules.filter((m) => m.courseId === courseId).sort((a, b) => a.seq - b.seq);
-const lessonsOfCourse = (courseId) => db.lessons.filter((l) => l.courseId === courseId).sort((a, b) => a.globalSeq - b.globalSeq);
-const lessonsOfModule = (moduleId) => db.lessons.filter((l) => l.moduleId === moduleId).sort((a, b) => a.seq - b.seq);
-const quizzesOfCourse = (courseId) => db.quizzes.filter((q) => q.courseId === courseId);
-const enrollmentsOfCourse = (courseId) => db.enrollments.filter((e) => e.courseId === courseId);
-const enrollmentsOfStudent = (studentId) => db.enrollments.filter((e) => e.studentId === studentId);
-const isEnrolled = (studentId, courseId) =>
-  db.enrollments.some((e) => e.studentId === studentId && e.courseId === courseId && e.status !== 'dropped');
-
-const lessonDone = (studentId, lessonId) =>
-  db.progress.some((p) => p.studentId === studentId && p.lessonId === lessonId);
-
-const courseProgress = (studentId, courseId) => {
-  const total = lessonsOfCourse(courseId).length;
-  const done = lessonsOfCourse(courseId).filter((l) => lessonDone(studentId, l.id)).length;
-  return { done, total, pct: pctOf(done, total) };
-};
-
-const enrollmentFor = (studentId, courseId) =>
-  db.enrollments.find((e) => e.studentId === studentId && e.courseId === courseId && e.status !== 'dropped') || null;
-
-const gradeFor = (studentId, courseId) =>
-  db.grades.find((g) => g.studentId === studentId && g.courseId === courseId) || null;
-
-const attemptsFor = (studentId, quizId) =>
-  db.attempts.filter((a) => a.studentId === studentId && a.quizId === quizId);
-
-const quizWindow = (quiz) => {
-  const t = Date.now();
-  if (quiz.status === 'draft') return { open: false, reason: 'This quiz is still a draft.' };
-  if (quiz.status === 'closed') return { open: false, reason: 'This quiz is closed.' };
-  const open = quiz.availableFrom ? new Date(quiz.availableFrom).getTime() : -Infinity;
-  const close = quiz.availableUntil ? new Date(quiz.availableUntil).getTime() : Infinity;
-  if (t < open) return { open: false, reason: `Opens ${fmtDate(quiz.availableFrom)}.` };
-  if (t > close) return { open: false, reason: `Closed since ${fmtDate(quiz.availableUntil)}.` };
-  return { open: true, reason: '' };
-};
-
-const lessonUnlocked = (studentId, courseId, lesson) => {
-  const courseLessons = lessonsOfCourse(courseId);
-  const idx = courseLessons.findIndex((l) => l.id === lesson.id);
-  if (idx <= 0) return true;
-  return lessonDone(studentId, courseLessons[idx - 1].id);
-};
-
-const enrollmentsForCourse = (courseId) => db.enrollments.filter((e) => e.courseId === courseId);
-
-const certIdFor = (studentId, courseId) =>
-  `ML-${byId(db.courses, courseId)?.code || 'XX'}-${String(studentId).slice(-4).toUpperCase()}-${courseId.slice(-4).toUpperCase()}`;
-
-const courseEligibleCert = (studentId, courseId) => {
-  const p = courseProgress(studentId, courseId);
-  return p.total > 0 && p.done === p.total;
-};
-
-/* ======================= 5. Audit & notifications ======================= */
-function logAudit(action, entity, entityId, detail, actor) {
-  const who = actor || session.user;
-  db.audit.unshift({
-    id: uid('log'), actorId: who ? who.id : 'system', actorName: who ? who.name : 'System',
-    action, entity, entityId: String(entityId || ''), detail, at: nowISO(),
   });
-  if (db.audit.length > 300) db.audit.length = 300;
-}
 
-function pushNotification(userId, title, body) {
-  db.notifications.unshift({ id: uid('n'), userId, title, body, createdAt: nowISO(), read: false });
-}
+  if (!res.ok) return res;
 
-function pushActivity(type) {
-  const u = session.user;
-  db.activity.unshift({ id: uid('act'), type, userId: u ? u.id : 'system', at: nowISO() });
-  if (db.activity.length > 400) db.activity.length = 400;
-}
+  localStorage.setItem(TOKEN_KEY, res.token);
+  session.set(String(res.user.id));
 
-/** Re-read the server-backed collections after a mutation (never throws). */
-async function syncQuiet() {
   try {
     await syncFromServer();
   } catch (err) {
-    toast(`Saved to MySQL, but refreshing from the backend failed: ${err.message}`, 'warning');
+    clearUserCache();
+
+    if (err.status === 401 || err.status === 403) {
+      AUTH_NOTICE =
+        'Invalid login or you do not have access. Please sign in again.';
+    }
+
+    return { ok: false, error: err.message };
   }
-}
 
-/* ============================ 6. API service ============================ */
-const api = {
-  /* ---- auth: the server verifies the password and issues the token ---- */
-  async login(email, password) {
-    clearUserCache();
-    const res = await apiFetch('/api/auth/login', { method: 'POST', body: { email, password } });
-    if (!res.ok) return res;
-    localStorage.setItem(TOKEN_KEY, res.token);
-    session.set(String(res.user.id));
-    try {
-      await syncFromServer();
-    } catch (err) {
-      clearUserCache();
-      if (err.status === 401 || err.status === 403) {
-        AUTH_NOTICE = 'You do not have access to that account. Please sign in again.';
-      }
-      return { ok: false, error: err.message };
-    }
-    logAudit('login', 'user', res.user.id, `${res.user.name} signed in.`);
-    pushActivity('login');
-    store.save();
-    return { ok: true, user: session.user };
-  },
+  logAudit(
+    'login',
+    'user',
+    res.user.id,
+    `${res.user.name} signed in.`
+  );
 
-  async loginAsRole(role) {
-    // Pick a demo account from the LOCAL config; the server still validates
-    // the e-mail, the password and the account status before issuing a token.
-    const user = DEMO_ACCOUNTS.find((u) => u.role === role);
-    if (!user) return { ok: false, error: 'No demo account configured for that role.' };
-    return api.login(user.email, DEMO_PASSWORD);
-  },
+  pushActivity('login');
+  store.save();
 
-  async logout() {
-    const u = session.user;
-    if (u) logAudit('logout', 'user', u.id, `${u.name} signed out.`);
-    try { await apiFetch('/api/auth/logout', { method: 'POST' }); } catch (err) { /* best effort */ }
-    clearUserCache();
-  },
+  return { ok: true, user: session.user };
+},
 
-  async resetDemo() {
-    // No server-side reset endpoint exists, so this clears the local session,
-    // overlay and cache only - MySQL records are untouched (shown in the toast).
-    store.reset();
-    toast('Signed out and cleared local browser data. MySQL records are kept — the backend has no reset endpoint.', 'info');
-    setTimeout(() => location.reload(), 900);
-  },
-
-  /* ---- enrollment (rules 3 + 4; the server re-checks both) ---- */
-  async enroll(studentId, courseId) {
-    const course = byId(db.courses, courseId);
-    if (!course) return { ok: false, error: 'Course not found.' };
-    if (course.status !== 'published') return { ok: false, error: 'You can only enroll in published courses. (Rule 3)' };
-    if (isEnrolled(studentId, courseId)) return { ok: false, error: 'Already enrolled in this course. (Rule 4)' };
-    // Prerequisites exist only in the browser overlay (no MySQL column), so
-    // this rule can only be checked here - the server cannot see it.
-    const unmet = (course.prereqIds || []).filter((pid) => courseProgress(studentId, pid).pct < 50);
-    if (unmet.length) {
-      const names = unmet.map((pid) => byId(db.courses, pid)?.code || pid).join(', ');
-      return { ok: false, error: `Prerequisite not met: complete at least 50% of ${names} first.` };
-    }
-    const res = await apiFetch('/api/enrollments', { method: 'POST', body: { CourseID: Number(courseId) } });
-    if (!res.ok) return res;
-    logAudit('enroll', 'enrollment', courseId, `Enrolled in ${course.code} ${course.title}.`);
-    pushNotification(course.instructorId, 'New enrollment', `${byId(db.users, studentId)?.name} enrolled in ${course.code}.`);
-    await syncQuiet();
-    store.save();
-    return { ok: true };
-  },
-
-  async unenroll(studentId, courseId) {
-    const e = enrollmentFor(studentId, courseId);
-    if (!e) return { ok: false, error: 'No enrollment found.' };
-    const res = await apiFetch(`/api/enrollments/${e.id}/status`, { method: 'PUT', body: { status: 'dropped' } });
-    if (!res.ok) return res;
-    logAudit('unenroll', 'enrollment', courseId, `Dropped enrollment in ${byId(db.courses, courseId)?.code}.`);
-    await syncQuiet();
-    store.save();
-    return { ok: true };
-  },
 
   /* ---- lessons (rules 5 + 10 + 11; progress lives in localStorage only) ---- */
   async completeLesson(studentId, lessonId) {
@@ -3958,8 +3759,3 @@ async function init() {
   }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
